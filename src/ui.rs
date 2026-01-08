@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy_egui::{egui, EguiContexts};
 use crate::components::*;
 use crate::battle::BattleState;
 use crate::genetics::Population;
@@ -23,22 +24,54 @@ pub fn ui_system(
     // Пока оставим заглушку
 }
 
+/// Система UI для состояния Setup
+pub fn setup_ui_system(
+    mut contexts: EguiContexts,
+    mut population: ResMut<Population>,
+    mut next_state: ResMut<NextState<GameState>>,
+) {
+    egui::CentralPanel::default().show(contexts.ctx_mut(), |ui| {
+        ui.vertical_centered(|ui| {
+            ui.add_space(100.0);
+            ui.heading("Tank Battle Simulator");
+            ui.add_space(50.0);
+            
+            ui.label(format!("Текущее поколение: {}", population.generation));
+            ui.add_space(20.0);
+            
+            if ui.button("Начать сначала").clicked() {
+                *population = crate::genetics::Population::new_fresh(population.genomes.len());
+                next_state.set(GameState::Battle);
+            }
+            
+            ui.add_space(10.0);
+            
+            if ui.button("Продолжить").clicked() {
+                next_state.set(GameState::Battle);
+            }
+        });
+    });
+}
+
 /// Компонент для отображения статистики
 #[derive(Component)]
 pub struct StatsText;
 
-/// Система для создания UI элементов
-pub fn setup_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
+/// Система для загрузки UI ассетов
+pub fn load_ui_assets(mut commands: Commands, asset_server: Res<AssetServer>) {
     // Загружаем шрифт (положите файл в assets/fonts/FiraSans-Bold.ttf)
     let font: Handle<Font> = asset_server.load("fonts/FiraSans-Bold.ttf");
-    commands.insert_resource(UiAssets { font: font.clone() });
+    commands.insert_resource(UiAssets { font });
+}
 
+/// Система для создания UI элементов статистики
+pub fn create_stats_ui(mut commands: Commands, ui_assets: Res<UiAssets>) {
     // Создаем текст для статистики
     commands.spawn((
         TextBundle::from_section(
             "Статистика",
             TextStyle {
-                font,
+                font: ui_assets.font.clone(),
                 font_size: 20.0,
                 color: Color::WHITE,
                 ..default()
@@ -52,6 +85,13 @@ pub fn setup_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
         }),
         StatsText,
     ));
+}
+
+/// Система для удаления UI статистики
+pub fn despawn_stats_ui(mut commands: Commands, query: Query<Entity, With<StatsText>>) {
+    for entity in query.iter() {
+        commands.entity(entity).despawn();
+    }
 }
 
 /// Обновление UI со статистикой

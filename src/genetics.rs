@@ -13,6 +13,16 @@ pub struct Population {
 
 impl Population {
     pub fn new(size: usize) -> Self {
+        if let Some(loaded) = load_genomes() {
+            println!("Загружены лучшие геномы из предыдущего запуска, поколение {}", loaded.generation);
+            loaded
+        } else {
+            println!("Создание новой популяции случайных геномов");
+            Self::new_fresh(size)
+        }
+    }
+    
+    pub fn new_fresh(size: usize) -> Self {
         let genomes = (0..size)
             .map(|_| AIController::new_random())
             .collect();
@@ -163,11 +173,23 @@ fn save_best_genomes(population: &Population) {
 }
 
 /// Загрузка геномов из файла
-#[allow(dead_code)]
 pub fn load_genomes() -> Option<Population> {
-    if let Ok(json) = std::fs::read_to_string("best_genomes.json") {
-        serde_json::from_str(&json).ok()
-    } else {
-        None
+    match std::fs::read_to_string("best_genomes.json") {
+        Ok(json) => {
+            match serde_json::from_str::<Population>(&json) {
+                Ok(pop) => {
+                    println!("Successfully loaded population with generation {}", pop.generation);
+                    Some(pop)
+                },
+                Err(e) => {
+                    println!("Failed to parse JSON: {}", e);
+                    None
+                }
+            }
+        },
+        Err(e) => {
+            println!("Failed to read best_genomes.json: {}", e);
+            None
+        }
     }
 }

@@ -1,6 +1,14 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Hash, States)]
+pub enum GameState {
+    #[default]
+    Setup,
+    Battle,
+    Evolution,
+}
+
 /// Компонент танка
 #[derive(Component)]
 #[allow(dead_code)]

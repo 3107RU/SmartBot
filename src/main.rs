@@ -12,16 +12,18 @@ use bevy_egui::EguiPlugin;
 use systems::*;
 use camera::*;
 use ui::*;
-
-#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Hash, States)]
-enum GameState {
-    #[default]
-    Setup,
-    Battle,
-    Evolution,
-}
+use crate::components::GameState;
 
 fn main() {
+    let fresh_start = std::env::args().any(|arg| arg == "--fresh");
+    let population = if fresh_start {
+        genetics::Population::new_fresh(20)
+    } else {
+        genetics::Population::new(20)
+    };
+    
+    println!("Population initialized: generation {}, fresh_start: {}", population.generation, fresh_start);
+    
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
@@ -31,10 +33,11 @@ fn main() {
             }),
             ..default()
         })).add_plugins(EguiPlugin)
+        .insert_resource(population)
         .insert_resource(TimeMultiplier::default())
         .insert_resource(TimeMultiplierUiState::default())
         .add_state::<GameState>()
-        .add_systems(Startup, (setup, ui::setup_ui))
+        .add_systems(Startup, (setup, load_ui_assets))
         .add_systems(Update, (
             tank_movement_system,
             tank_shooting_system,
@@ -53,17 +56,17 @@ fn main() {
             ui_system,
             update_stats_ui,
         ))
-        .add_systems(OnEnter(GameState::Battle), battle::start_battle)
-        .add_systems(OnExit(GameState::Battle), battle::end_battle)
+        .add_systems(Update, setup_ui_system.run_if(in_state(GameState::Setup)))
+        .add_systems(OnEnter(GameState::Battle), (battle::start_battle, create_stats_ui, battle::spawn_tanks_from_population))
+        .add_systems(OnExit(GameState::Battle), (battle::end_battle, despawn_stats_ui))
         .add_systems(OnEnter(GameState::Evolution), genetics::evolve_population)
-        .add_systems(OnEnter(GameState::Setup), battle::spawn_tanks_from_population)
         .run();
     }
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut next_state: ResMut<NextState<GameState>>,
+    _next_state: ResMut<NextState<GameState>>,
 ) {
     info!("Setup started");
     // Свет
@@ -106,7 +109,6 @@ fn setup(
 
     // Инициализация ресурсов
     commands.insert_resource(battle::BattleState::default());
-    commands.insert_resource(genetics::Population::new(20));
     commands.insert_resource(camera::CameraState::default());
     
     // Генерируем карту
@@ -117,5 +119,5 @@ fn setup(
     // battle::spawn_initial_tanks(&mut commands, &mut meshes, &mut materials);
     
     // Начинаем битву
-    next_state.set(GameState::Battle);
+    // next_state.set(GameState::Battle);
 }

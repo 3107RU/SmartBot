@@ -285,7 +285,6 @@ pub fn ai_control_system(
     all_tanks: Query<(&Transform, &Tank), Without<AIController>>,
     obstacle_query: Query<&Transform, (With<ObstacleComponent>, Without<Tank>)>,
 ) {
-    info!("AI control running, tanks: {}", ai_tanks.iter().count());
     for (entity, mut transform, tank, mut ai, mut cooldown, team_color) in ai_tanks.iter_mut() {
         let dt = time_multiplier.scaled_seconds(&time);
         let scaled_delta = time_multiplier.scaled_delta(&time);
