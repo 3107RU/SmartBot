@@ -2,14 +2,14 @@ use bevy::prelude::*;
 use bevy::prelude::shape;
 use crate::components::*;
 use crate::genetics::Population;
-use crate::systems::TimeMultiplier;
 use rand::Rng;
 
 #[derive(Resource, Default)]
 #[allow(dead_code)]
 pub struct BattleState {
-    pub battle_time: f32,
-    pub max_battle_time: f32,
+    pub tick_count: u32,
+    pub max_ticks: u32,
+    pub real_time: f32,
     pub teams: Vec<TeamStats>,
 }
 
@@ -34,8 +34,9 @@ impl Default for TeamStats {
 pub fn start_battle(
     mut battle_state: ResMut<BattleState>,
 ) {
-    battle_state.battle_time = 0.0;
-    battle_state.max_battle_time = 120.0; // 2 минуты на бой
+    battle_state.tick_count = 0;
+    battle_state.real_time = 0.0;
+    battle_state.max_ticks = 3600; // 120 * 30 тактов
     info!("Битва началась!");
 }
 
@@ -173,12 +174,10 @@ pub fn spawn_tank(
 /// Система проверки окончания боя
 pub fn check_battle_end(
     mut battle_state: ResMut<BattleState>,
-    time: Res<Time>,
-    time_multiplier: Res<TimeMultiplier>,
     tank_query: Query<&Tank>,
     mut next_state: ResMut<NextState<crate::GameState>>,
 ) {
-    battle_state.battle_time += time_multiplier.scaled_seconds(&time);
+    battle_state.tick_count += 1;
     
     // Проверяем, есть ли танки разных команд
     let mut teams_alive = std::collections::HashSet::new();
@@ -190,13 +189,21 @@ pub fn check_battle_end(
     
     // Бой закончен если:
     // 1. Осталась только одна команда
-    // 2. Время вышло
+    // 2. Такты закончились
     // 3. Все танки уничтожены
     if teams_alive.len() <= 1 || 
-       battle_state.battle_time >= battle_state.max_battle_time ||
+       battle_state.tick_count >= battle_state.max_ticks ||
        total_tanks == 0 {
         next_state.set(crate::GameState::Evolution);
     }
+}
+
+/// Обновление реального времени боя
+pub fn update_real_time(
+    time: Res<Time>,
+    mut battle_state: ResMut<BattleState>,
+) {
+    battle_state.real_time += time.delta_seconds();
 }
 
 /// Система для устройства боя между разными поколениями

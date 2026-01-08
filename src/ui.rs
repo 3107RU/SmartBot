@@ -6,6 +6,14 @@ use crate::genetics::Population;
 use crate::camera::CameraState;
 use crate::systems::TimeMultiplier;
 
+/// Ресурс для отслеживания, был ли показан стартовый выбор
+#[derive(Resource, Default)]
+pub struct StartupChoiceMade(pub bool);
+
+/// Таймер для автоматического продолжения
+#[derive(Resource)]
+pub struct StartupTimer(pub Timer);
+
 /// Ресурс с хэндлами UI (шрифты и т.п.)
 #[derive(Resource, Clone)]
 #[allow(dead_code)]
@@ -29,7 +37,24 @@ pub fn setup_ui_system(
     mut contexts: EguiContexts,
     mut population: ResMut<Population>,
     mut next_state: ResMut<NextState<GameState>>,
+    mut choice_made: ResMut<StartupChoiceMade>,
+    mut timer: ResMut<StartupTimer>,
+    time: Res<Time>,
 ) {
+    if choice_made.0 {
+        next_state.set(GameState::Battle);
+        return;
+    }
+    
+    timer.0.tick(time.delta());
+    
+    if timer.0.finished() {
+        info!("Автоматическое продолжение");
+        choice_made.0 = true;
+        next_state.set(GameState::Battle);
+        return;
+    }
+    
     egui::CentralPanel::default().show(contexts.ctx_mut(), |ui| {
         ui.vertical_centered(|ui| {
             ui.add_space(100.0);
@@ -41,14 +66,19 @@ pub fn setup_ui_system(
             
             if ui.button("Начать сначала").clicked() {
                 *population = crate::genetics::Population::new_fresh(population.genomes.len());
+                choice_made.0 = true;
                 next_state.set(GameState::Battle);
             }
             
             ui.add_space(10.0);
             
             if ui.button("Продолжить").clicked() {
+                choice_made.0 = true;
                 next_state.set(GameState::Battle);
             }
+            
+            ui.add_space(20.0);
+            ui.label(format!("Автопродолжение через: {:.1}s", timer.0.remaining_secs()));
         });
     });
 }
@@ -107,21 +137,29 @@ pub fn update_stats_ui(
         let team0_count = tank_query.iter().filter(|t| t.team == 0).count();
         let team1_count = tank_query.iter().filter(|t| t.team == 1).count();
         
+        let current_best = population.genomes.first().map(|g| g.fitness).unwrap_or(0.0);
+        let max_fitness = population.best_genome.as_ref().map(|b| b.fitness).unwrap_or(0.0);
+        
         text.sections[0].value = format!(
             "Поколение: {}\n\
              Танков живых: {}\n\
              Команда 0 (синие): {}\n\
              Команда 1 (красные): {}\n\
-             Время боя: {:.1}s\n\
+             Время боя: {:.1}s ({:.0} тактов)\n\
              Скорость времени: {:.2}x\n\
+             Лучший фитнес: {:.0}\n\
+             Максимальный фитнес: {:.0}\n\
              \n\
              F1 — показать/скрыть помощь и слайдер скорости",
             population.generation,
             alive_tanks,
             team0_count,
             team1_count,
-            battle_state.battle_time,
+            battle_state.real_time,
+            battle_state.tick_count,
             time_multiplier.scale,
+            current_best,
+            max_fitness,
         );
     }
 }

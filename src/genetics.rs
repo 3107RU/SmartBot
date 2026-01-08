@@ -64,6 +64,11 @@ impl Population {
             new_genomes.push(elite);
         }
         
+        // Восстанавливаем лучший геном с правильным фитнесом
+        if let Some(best) = &self.best_genome {
+            new_genomes[0] = best.clone();
+        }
+        
         // Создаем остальных через скрещивание и мутацию
         while new_genomes.len() < self.population_size {
             let parent1 = self.select_parent();
@@ -161,8 +166,8 @@ pub fn evolve_population(
     
     info!("Эволюция завершена, поколение {}", population.generation);
     
-    // Возвращаемся к битве
-    next_state.set(crate::GameState::Setup);
+    // Начинаем следующий матч
+    next_state.set(crate::GameState::Battle);
 }
 
 /// Сохранение лучших геномов в файл

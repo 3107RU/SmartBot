@@ -1,10 +1,10 @@
 use bevy::prelude::*;
 use bevy::prelude::shape;
+use bevy::time::Fixed;
 use bevy_egui::{egui, EguiContexts};
 use crate::components::*;
 use crate::ai::*;
 use crate::map::ObstacleComponent;
-use std::time::Duration;
 
 /// Глобальный множитель скорости симуляции
 #[derive(Resource, Debug, Clone, Copy)]
@@ -19,13 +19,7 @@ impl Default for TimeMultiplier {
 }
 
 impl TimeMultiplier {
-    pub fn scaled_seconds(&self, time: &Time) -> f32 {
-        time.delta_seconds() * self.scale
-    }
-
-    pub fn scaled_delta(&self, time: &Time) -> Duration {
-        time.delta().mul_f32(self.scale)
-    }
+    // Методы больше не нужны, поскольку используем fixed timestep
 }
 
 /// Состояние видимости UI множителя времени
@@ -45,6 +39,7 @@ pub fn time_multiplier_input_system(
     keys: Res<Input<KeyCode>>,
     mut multiplier: ResMut<TimeMultiplier>,
     mut ui_state: ResMut<TimeMultiplierUiState>,
+    mut time_fixed: ResMut<Time<Fixed>>,
 ) {
     let mut new_scale = multiplier.scale;
 
@@ -66,7 +61,8 @@ pub fn time_multiplier_input_system(
 
     if (new_scale - multiplier.scale).abs() > f32::EPSILON {
         multiplier.scale = new_scale;
-        info!("Множитель времени: {:.2}x", multiplier.scale);
+        time_fixed.set_timestep_hz((30.0 * multiplier.scale) as f64);
+        info!("Множитель времени: {:.2}x, timestep: {:.4}s", multiplier.scale, 1.0 / (30.0 * multiplier.scale));
     }
 }
 
@@ -75,6 +71,7 @@ pub fn time_multiplier_ui_system(
     mut contexts: EguiContexts,
     mut multiplier: ResMut<TimeMultiplier>,
     ui_state: Res<TimeMultiplierUiState>,
+    mut time_fixed: ResMut<Time<Fixed>>,
 ) {
     if !ui_state.visible {
         return;
@@ -93,9 +90,11 @@ pub fn time_multiplier_ui_system(
                 .text("x"),
         ).changed() {
             multiplier.scale = scale;
+            time_fixed.set_timestep_hz((30.0 * multiplier.scale) as f64);
         }
         if ui.button("Сбросить до 1x").clicked() {
             multiplier.scale = 1.0;
+            time_fixed.set_timestep_hz((30.0 * multiplier.scale) as f64);
         }
     });
 
@@ -145,14 +144,13 @@ pub fn projectile_movement_system(
     mut query: Query<(Entity, &mut Transform, &mut Projectile)>,
 ) {
     for (entity, mut transform, mut projectile) in query.iter_mut() {
-        let dt = time_multiplier.scaled_seconds(&time);
-        let scaled_delta = time_multiplier.scaled_delta(&time);
+        let dt = time.delta_seconds();
         // Двигаем снаряд вперед
         let forward = transform.back();
-        transform.translation += forward * projectile.speed * dt;
+        transform.translation += forward * projectile.speed * time_multiplier.scale * dt;
         
         // Обновляем таймер жизни
-        projectile.lifetime.tick(scaled_delta);
+        projectile.lifetime.tick(time.delta());
         if projectile.lifetime.finished() {
             commands.entity(entity).despawn();
         }
@@ -216,9 +214,8 @@ pub fn player_control_system(
     for (entity, mut transform, tank, mut cooldown, team_color) in query.iter_mut() {
         let mut direction = Vec3::ZERO;
         let mut rotation = 0.0;
-        let dt = time_multiplier.scaled_seconds(&time);
-        let scaled_delta = time_multiplier.scaled_delta(&time);
-        cooldown.timer.tick(scaled_delta);
+        let dt = time.delta_seconds();
+        cooldown.timer.tick(time.delta());
         
         if keyboard.pressed(KeyCode::W) {
             direction += transform.forward();
@@ -227,13 +224,13 @@ pub fn player_control_system(
             direction -= transform.forward();
         }
         if keyboard.pressed(KeyCode::A) {
-            rotation += tank.rotation_speed;
+            rotation += tank.rotation_speed * time_multiplier.scale;
         }
         if keyboard.pressed(KeyCode::D) {
-            rotation -= tank.rotation_speed;
+            rotation -= tank.rotation_speed * time_multiplier.scale;
         }
         
-        transform.translation += direction * tank.speed * dt;
+        transform.translation += direction * tank.speed * time_multiplier.scale * dt;
         
         // Проверяем столкновение с препятствиями
         let mut collided = false;
@@ -286,11 +283,10 @@ pub fn ai_control_system(
     obstacle_query: Query<&Transform, (With<ObstacleComponent>, Without<Tank>)>,
 ) {
     for (entity, mut transform, tank, mut ai, mut cooldown, team_color) in ai_tanks.iter_mut() {
-        let dt = time_multiplier.scaled_seconds(&time);
-        let scaled_delta = time_multiplier.scaled_delta(&time);
+        let dt = time.delta_seconds();
 
-        ai.survival_time += dt;
-        cooldown.timer.tick(scaled_delta);
+        ai.survival_time += 1.0; // Каждый такт +1
+        cooldown.timer.tick(time.delta());
         
         // Находим ближайшего врага
         let mut nearest_enemy_pos = None;
@@ -329,7 +325,7 @@ pub fn ai_control_system(
         // Применяем движение
         let forward = transform.forward();
         let old_pos = transform.translation;
-        transform.translation += forward * move_input * tank.speed * dt;
+        transform.translation += forward * move_input * tank.speed * time_multiplier.scale * dt;
         
         // Проверяем столкновение с препятствиями
         let mut collided = false;
@@ -358,7 +354,7 @@ pub fn ai_control_system(
         }
         
         // Применяем поворот
-        transform.rotate_y(turn_input * tank.rotation_speed * dt);
+        transform.rotate_y(turn_input * tank.rotation_speed * time_multiplier.scale * dt);
         
         // Фиксируем высоту танка на поверхности
         transform.translation.y = 0.5;

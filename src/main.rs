@@ -8,6 +8,7 @@ mod camera;
 mod ui;
 
 use bevy::prelude::*;
+use bevy::time::Fixed;
 use bevy_egui::EguiPlugin;
 use systems::*;
 use camera::*;
@@ -36,9 +37,11 @@ fn main() {
         .insert_resource(population)
         .insert_resource(TimeMultiplier::default())
         .insert_resource(TimeMultiplierUiState::default())
+        .insert_resource(crate::ui::StartupChoiceMade::default())
+        .insert_resource(crate::ui::StartupTimer(Timer::from_seconds(5.0, TimerMode::Once)))
         .add_state::<GameState>()
-        .add_systems(Startup, (setup, load_ui_assets))
-        .add_systems(Update, (
+        .add_systems(Startup, (setup, load_ui_assets, init_fixed_timestep))
+        .add_systems(FixedUpdate, (
             tank_movement_system,
             tank_shooting_system,
             projectile_movement_system,
@@ -55,6 +58,7 @@ fn main() {
             tank_selection_system.after(time_multiplier_ui_system),
             ui_system,
             update_stats_ui,
+            battle::update_real_time,
         ))
         .add_systems(Update, setup_ui_system.run_if(in_state(GameState::Setup)))
         .add_systems(OnEnter(GameState::Battle), (battle::start_battle, create_stats_ui, battle::spawn_tanks_from_population))
@@ -120,4 +124,11 @@ fn setup(
     
     // Начинаем битву
     // next_state.set(GameState::Battle);
+}
+
+fn init_fixed_timestep(
+    mut time_fixed: ResMut<Time<Fixed>>,
+    multiplier: Res<TimeMultiplier>,
+) {
+    time_fixed.set_timestep_hz((30.0 * multiplier.scale) as f64);
 }
