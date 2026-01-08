@@ -8,6 +8,7 @@ mod camera;
 mod ui;
 
 use bevy::prelude::*;
+use bevy_egui::EguiPlugin;
 use systems::*;
 use camera::*;
 use ui::*;
@@ -29,7 +30,9 @@ fn main() {
                 ..default()
             }),
             ..default()
-        }))
+        })).add_plugins(EguiPlugin)
+        .insert_resource(TimeMultiplier::default())
+        .insert_resource(TimeMultiplierUiState::default())
         .add_state::<GameState>()
         .add_systems(Startup, (setup, ui::setup_ui))
         .add_systems(Update, (
@@ -43,8 +46,10 @@ fn main() {
             battle::check_battle_end,
         ).run_if(in_state(GameState::Battle)))
         .add_systems(Update, (
+            time_multiplier_input_system,
+            time_multiplier_ui_system,
             camera_control_system,
-            tank_selection_system,
+            tank_selection_system.after(time_multiplier_ui_system),
             ui_system,
             update_stats_ui,
         ))
@@ -52,8 +57,7 @@ fn main() {
         .add_systems(OnExit(GameState::Battle), battle::end_battle)
         .add_systems(OnEnter(GameState::Evolution), genetics::evolve_population)
         .run();
-}
-
+    }
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,

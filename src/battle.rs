@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use bevy::prelude::shape;
 use crate::components::*;
 use crate::genetics::Population;
+use crate::systems::TimeMultiplier;
 use rand::Rng;
 
 #[derive(Resource, Default)]
@@ -144,10 +145,11 @@ pub fn spawn_tank(
 pub fn check_battle_end(
     mut battle_state: ResMut<BattleState>,
     time: Res<Time>,
+    time_multiplier: Res<TimeMultiplier>,
     tank_query: Query<&Tank>,
     mut next_state: ResMut<NextState<crate::GameState>>,
 ) {
-    battle_state.battle_time += time.delta_seconds();
+    battle_state.battle_time += time_multiplier.scaled_seconds(&time);
     
     // Проверяем, есть ли танки разных команд
     let mut teams_alive = std::collections::HashSet::new();

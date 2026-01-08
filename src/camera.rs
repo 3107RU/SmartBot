@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy_egui::EguiContexts;
 use crate::components::*;
 
 #[derive(Resource, Default)]
@@ -93,6 +94,7 @@ pub fn camera_control_system(
 
 /// Система выбора танка мышью
 pub fn tank_selection_system(
+    mut contexts: EguiContexts,
     mouse_button: Res<Input<MouseButton>>,
     windows: Query<&Window>,
     camera_query: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
@@ -100,6 +102,11 @@ pub fn tank_selection_system(
     mut camera_state: ResMut<CameraState>,
     mut commands: Commands,
 ) {
+    let ctx = contexts.ctx_mut();
+    if ctx.wants_pointer_input() || ctx.is_pointer_over_area() || ctx.wants_keyboard_input() {
+        return;
+    }
+
     // Клик мышью для выбора танка
     if mouse_button.just_pressed(MouseButton::Left) {
         let window = windows.single();

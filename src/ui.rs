@@ -3,6 +3,7 @@ use crate::components::*;
 use crate::battle::BattleState;
 use crate::genetics::Population;
 use crate::camera::CameraState;
+use crate::systems::TimeMultiplier;
 
 /// Ресурс с хэндлами UI (шрифты и т.п.)
 #[derive(Resource, Clone)]
@@ -59,6 +60,7 @@ pub fn update_stats_ui(
     tank_query: Query<&Tank>,
     population: Res<Population>,
     battle_state: Res<BattleState>,
+    time_multiplier: Res<TimeMultiplier>,
 ) {
     if let Ok(mut text) = query.get_single_mut() {
         let alive_tanks = tank_query.iter().count();
@@ -71,19 +73,15 @@ pub fn update_stats_ui(
              Команда 0 (синие): {}\n\
              Команда 1 (красные): {}\n\
              Время боя: {:.1}s\n\
+             Скорость времени: {:.2}x\n\
              \n\
-             Управление:\n\
-             WASD - движение танка (если управляете)\n\
-             Пробел - выстрел\n\
-             Tab - переключение камеры\n\
-             Стрелки - движение камеры\n\
-             +/- - zoom\n\
-             ЛКМ на танк - выбрать для вида от 3-го лица",
+             F1 — показать/скрыть помощь и слайдер скорости",
             population.generation,
             alive_tanks,
             team0_count,
             team1_count,
             battle_state.battle_time,
+            time_multiplier.scale,
         );
     }
 }
