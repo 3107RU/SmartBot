@@ -149,6 +149,8 @@ pub fn evolve_population(
     // Сохраняем лучшие геномы
     save_best_genomes(&population);
     
+    info!("Эволюция завершена, поколение {}", population.generation);
+    
     // Возвращаемся к битве
     next_state.set(crate::GameState::Setup);
 }

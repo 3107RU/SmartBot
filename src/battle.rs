@@ -41,43 +41,57 @@ pub fn start_battle(
 
 /// Завершение битвы
 pub fn end_battle(
-    _population: ResMut<Population>,
-    query: Query<&AIController>,
+    mut population: ResMut<Population>,
+    query: Query<(Entity, &AIController)>,
     mut next_state: ResMut<NextState<crate::GameState>>,
 ) {
     // Обновляем фитнес всех танков
-    for _ai in query.iter() {
-        // Фитнес уже обновлён в процессе боя
+    for (entity, ai) in query.iter() {
+        population.calculate_fitness(entity, ai);
     }
     
     info!("Битва завершена!");
     next_state.set(crate::GameState::Evolution);
 }
 
-/// Создание начальных танков
-pub fn spawn_initial_tanks(
-    commands: &mut Commands,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
+/// Создание танков из текущей популяции
+pub fn spawn_tanks_from_population(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    population: Res<Population>,
+    tank_query: Query<Entity, With<Tank>>,
+    mut next_state: ResMut<NextState<crate::GameState>>,
 ) {
+    // Удаляем всех существующих танков
+    for entity in tank_query.iter() {
+        commands.entity(entity).despawn_recursive();
+    }
+    
+    info!("Спавн танков для поколения {}", population.generation);
+    
     let mut rng = rand::thread_rng();
     
-    // Создаем 10 танков в разных позициях
+    // Создаем 10 танков из лучших геномов популяции
     for i in 0..10 {
         let x = rng.gen_range(-40.0..40.0);
         let z = rng.gen_range(-40.0..40.0);
         
-        let ai = AIController::new_random();
+        // Используем геном из популяции (предполагаем, что они отсортированы)
+        let ai = population.genomes[i % population.genomes.len()].clone();
         
         spawn_tank(
-            commands,
-            meshes,
-            materials,
+            &mut commands,
+            &mut meshes,
+            &mut materials,
             Vec3::new(x, 1.0, z),
-            i % 2, // Команда 0 или 1
+            (i % 2) as u32, // Команда 0 или 1
             Some(ai),
         );
     }
+    
+    // Начинаем новый бой
+    next_state.set(crate::GameState::Battle);
 }
 
 /// Создание одного танка

@@ -56,6 +56,7 @@ fn main() {
         .add_systems(OnEnter(GameState::Battle), battle::start_battle)
         .add_systems(OnExit(GameState::Battle), battle::end_battle)
         .add_systems(OnEnter(GameState::Evolution), genetics::evolve_population)
+        .add_systems(OnEnter(GameState::Setup), battle::spawn_tanks_from_population)
         .run();
     }
 fn setup(
@@ -112,7 +113,7 @@ fn setup(
     game_map.spawn(&mut commands, &mut meshes, &mut materials);
     
     // Создаем начальную популяцию танков
-    battle::spawn_initial_tanks(&mut commands, &mut meshes, &mut materials);
+    // battle::spawn_initial_tanks(&mut commands, &mut meshes, &mut materials);
     
     // Начинаем битву
     next_state.set(GameState::Battle);

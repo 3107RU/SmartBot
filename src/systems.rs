@@ -162,6 +162,7 @@ pub fn collision_system(
     mut commands: Commands,
     projectile_query: Query<(Entity, &Transform, &Projectile)>,
     mut tank_query: Query<(Entity, &Transform, &mut Tank), Without<Projectile>>,
+    mut ai_query: Query<&mut AIController>,
 ) {
     for (proj_entity, proj_transform, projectile) in projectile_query.iter() {
         for (tank_entity, tank_transform, mut tank) in tank_query.iter_mut() {
@@ -176,6 +177,10 @@ pub fn collision_system(
                 commands.entity(proj_entity).despawn();
                 
                 if tank.health <= 0.0 {
+                    // Увеличиваем счётчик убийств у владельца снаряда
+                    if let Ok(mut ai) = ai_query.get_mut(projectile.owner) {
+                        ai.kills += 1;
+                    }
                     commands.entity(tank_entity).despawn_recursive();
                 }
                 break;
