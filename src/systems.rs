@@ -1,10 +1,40 @@
 use bevy::prelude::*;
 use bevy::prelude::shape;
-use bevy::time::Fixed;
+use bevy::time::{Fixed, TimeUpdateStrategy};
 use bevy_egui::{egui, EguiContexts};
 use crate::components::*;
+use crate::battle::BattleState;
 use crate::ai::*;
 use crate::map::ObstacleComponent;
+use std::time::Duration;
+use std::time::Instant;
+use crate::Headless;
+
+/// Базовая частота симуляции (независимо от реального времени)
+pub const BASE_SIM_HZ: f64 = 50.0;
+/// Базовый шаг времени симуляции в секундах
+pub const BASE_SIM_DT: f64 = 1.0 / BASE_SIM_HZ;
+
+/// Ресурс для редкого логирования прогресса
+#[derive(Resource)]
+pub struct ProgressLog {
+    pub last: Instant,
+}
+
+impl Default for ProgressLog {
+    fn default() -> Self {
+        Self {
+            last: Instant::now() - Duration::from_secs(30),
+        }
+    }
+}
+
+/// Предикат для run_if: выполняется только если не headless
+pub fn not_headless(headless: Res<Headless>) -> bool {
+    !headless.0
+}
+
+// Рендер-декрегация убрана из-за нестабильности пайплайна в Bevy 0.12
 
 /// Глобальный множитель скорости симуляции
 #[derive(Resource, Debug, Clone, Copy)]
@@ -34,12 +64,53 @@ impl Default for TimeMultiplierUiState {
     }
 }
 
+/// Обновляет стратегию обновления времени, чтобы шаг симуляции задавался вручную
+/// и масштабировался текущим множителем скорости.
+pub fn refresh_time_update_strategy(
+    multiplier: Res<TimeMultiplier>,
+    mut strategy: ResMut<TimeUpdateStrategy>,
+) {
+    let dt = Duration::from_secs_f64(BASE_SIM_DT * multiplier.scale as f64);
+    *strategy = TimeUpdateStrategy::ManualDuration(dt);
+}
+
+/// Печатает прогресс (поколение, лучший фитнес) не чаще чем раз в 30 секунд реального времени
+pub fn log_progress(
+    population: Res<crate::genetics::Population>,
+    battle_state: Res<BattleState>,
+    mut log: ResMut<ProgressLog>,
+) {
+    let now = Instant::now();
+    if now.duration_since(log.last) < Duration::from_secs(30) {
+        return;
+    }
+    log.last = now;
+
+    let best_current = population
+        .genomes
+        .iter()
+        .map(|g| g.fitness)
+        .fold(0.0_f32, f32::max);
+    let best_max = population
+        .best_genome
+        .as_ref()
+        .map(|g| g.fitness)
+        .unwrap_or(best_current);
+
+    println!(
+        "Прогресс: поколение {}, бой {:.1}s, лучший фитнес {:.1}, макс фитнес {:.1}",
+        population.generation,
+        battle_state.real_time,
+        best_current,
+        best_max
+    );
+}
+
 /// Управление множителем времени: [ и ] — замедление/ускорение, \ — сброс, F1 — показать/скрыть UI
 pub fn time_multiplier_input_system(
     keys: Res<Input<KeyCode>>,
     mut multiplier: ResMut<TimeMultiplier>,
     mut ui_state: ResMut<TimeMultiplierUiState>,
-    mut time_fixed: ResMut<Time<Fixed>>,
 ) {
     let mut new_scale = multiplier.scale;
 
@@ -61,8 +132,7 @@ pub fn time_multiplier_input_system(
 
     if (new_scale - multiplier.scale).abs() > f32::EPSILON {
         multiplier.scale = new_scale;
-        time_fixed.set_timestep_hz((30.0 * multiplier.scale) as f64);
-        info!("Множитель времени: {:.2}x, timestep: {:.4}s", multiplier.scale, 1.0 / (30.0 * multiplier.scale));
+        info!("Множитель времени: {:.2}x", multiplier.scale);
     }
 }
 
@@ -71,7 +141,6 @@ pub fn time_multiplier_ui_system(
     mut contexts: EguiContexts,
     mut multiplier: ResMut<TimeMultiplier>,
     ui_state: Res<TimeMultiplierUiState>,
-    mut time_fixed: ResMut<Time<Fixed>>,
 ) {
     if !ui_state.visible {
         return;
@@ -90,11 +159,9 @@ pub fn time_multiplier_ui_system(
                 .text("x"),
         ).changed() {
             multiplier.scale = scale;
-            time_fixed.set_timestep_hz((30.0 * multiplier.scale) as f64);
         }
         if ui.button("Сбросить до 1x").clicked() {
             multiplier.scale = 1.0;
-            time_fixed.set_timestep_hz((30.0 * multiplier.scale) as f64);
         }
     });
 
@@ -129,8 +196,8 @@ pub fn tank_movement_system(
 /// Система стрельбы танков
 pub fn tank_shooting_system(
     _commands: Commands,
-    _meshes: ResMut<Assets<Mesh>>,
-    _materials: ResMut<Assets<StandardMaterial>>,
+    _meshes: Option<ResMut<Assets<Mesh>>>,
+    _materials: Option<ResMut<Assets<StandardMaterial>>>,
     _query: Query<(Entity, &Transform, &Tank)>,
 ) {
     // Логика стрельбы добавляется через события
@@ -139,15 +206,14 @@ pub fn tank_shooting_system(
 /// Система движения снарядов
 pub fn projectile_movement_system(
     mut commands: Commands,
-    time: Res<Time>,
-    time_multiplier: Res<TimeMultiplier>,
+    time: Res<Time<Fixed>>,
     mut query: Query<(Entity, &mut Transform, &mut Projectile)>,
 ) {
     for (entity, mut transform, mut projectile) in query.iter_mut() {
         let dt = time.delta_seconds();
         // Двигаем снаряд вперед
         let forward = transform.back();
-        transform.translation += forward * projectile.speed * time_multiplier.scale * dt;
+        transform.translation += forward * projectile.speed * dt;
         
         // Обновляем таймер жизни
         projectile.lifetime.tick(time.delta());
@@ -202,11 +268,11 @@ pub fn collision_system(
 /// Система управления танком игроком
 pub fn player_control_system(
     keyboard: Res<Input<KeyCode>>,
-    time: Res<Time>,
-    time_multiplier: Res<TimeMultiplier>,
+    time: Res<Time<Fixed>>,
+    headless: Res<Headless>,
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut meshes: Option<ResMut<Assets<Mesh>>>,
+    mut materials: Option<ResMut<Assets<StandardMaterial>>>,
     mut query: Query<(Entity, &mut Transform, &Tank, &mut FireCooldown, &TeamColor), With<PlayerControlled>>,
     all_tanks: Query<(&Transform, &Tank), Without<PlayerControlled>>,
     obstacle_query: Query<&Transform, (With<ObstacleComponent>, Without<Tank>)>,
@@ -224,13 +290,13 @@ pub fn player_control_system(
             direction -= transform.forward();
         }
         if keyboard.pressed(KeyCode::A) {
-            rotation += tank.rotation_speed * time_multiplier.scale;
+            rotation += tank.rotation_speed;
         }
         if keyboard.pressed(KeyCode::D) {
-            rotation -= tank.rotation_speed * time_multiplier.scale;
+            rotation -= tank.rotation_speed;
         }
         
-        transform.translation += direction * tank.speed * time_multiplier.scale * dt;
+        transform.translation += direction * tank.speed * dt;
         
         // Проверяем столкновение с препятствиями
         let mut collided = false;
@@ -265,7 +331,7 @@ pub fn player_control_system(
         
         // Стрельба на пробел с кулдауном
         if keyboard.just_pressed(KeyCode::Space) && cooldown.timer.finished() {
-            spawn_projectile(&mut commands, &mut meshes, &mut materials, entity, &transform, team_color.0);
+            spawn_projectile(&mut commands, meshes.as_mut(), materials.as_mut(), entity, &transform, team_color.0, headless.0);
             cooldown.timer.reset();
         }
     }
@@ -273,11 +339,11 @@ pub fn player_control_system(
 
 /// Система управления танком через ИИ
 pub fn ai_control_system(
-    time: Res<Time>,
-    time_multiplier: Res<TimeMultiplier>,
+    time: Res<Time<Fixed>>,
+    headless: Res<Headless>,
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut meshes: Option<ResMut<Assets<Mesh>>>,
+    mut materials: Option<ResMut<Assets<StandardMaterial>>>,
     mut ai_tanks: Query<(Entity, &mut Transform, &Tank, &mut AIController, &mut FireCooldown, &TeamColor), Without<PlayerControlled>>,
     all_tanks: Query<(&Transform, &Tank), Without<AIController>>,
     obstacle_query: Query<&Transform, (With<ObstacleComponent>, Without<Tank>)>,
@@ -285,7 +351,7 @@ pub fn ai_control_system(
     for (entity, mut transform, tank, mut ai, mut cooldown, team_color) in ai_tanks.iter_mut() {
         let dt = time.delta_seconds();
 
-        ai.survival_time += 1.0; // Каждый такт +1
+        ai.survival_time += dt;
         cooldown.timer.tick(time.delta());
         
         // Находим ближайшего врага
@@ -325,7 +391,7 @@ pub fn ai_control_system(
         // Применяем движение
         let forward = transform.forward();
         let old_pos = transform.translation;
-        transform.translation += forward * move_input * tank.speed * time_multiplier.scale * dt;
+        transform.translation += forward * move_input * tank.speed * dt;
         
         // Проверяем столкновение с препятствиями
         let mut collided = false;
@@ -354,7 +420,7 @@ pub fn ai_control_system(
         }
         
         // Применяем поворот
-        transform.rotate_y(turn_input * tank.rotation_speed * time_multiplier.scale * dt);
+        transform.rotate_y(turn_input * tank.rotation_speed * dt);
         
         // Фиксируем высоту танка на поверхности
         transform.translation.y = 0.5;
@@ -366,7 +432,7 @@ pub fn ai_control_system(
         
         // Стрельба: если outputs[2] > 0.5 и cooldown готов
         if outputs[2] > 0.5 && cooldown.timer.finished() {
-            spawn_projectile(&mut commands, &mut meshes, &mut materials, entity, &transform, team_color.0);
+            spawn_projectile(&mut commands, meshes.as_mut(), materials.as_mut(), entity, &transform, team_color.0, headless.0);
             cooldown.timer.reset();
         }
     }
@@ -375,34 +441,50 @@ pub fn ai_control_system(
 /// Вспомогательная функция для создания снаряда
 fn spawn_projectile(
     commands: &mut Commands,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
+    meshes: Option<&mut ResMut<Assets<Mesh>>>,
+    materials: Option<&mut ResMut<Assets<StandardMaterial>>>,
     owner: Entity,
     transform: &Transform,
     color: Color,
+    headless: bool,
 ) {
     // Позиция конца ствола: turret center + barrel offset
     let turret_offset = Vec3::Y * 0.75;
     let barrel_end_offset = Vec3::new(0.0, 0.0, 1.25); // конец ствола от turret center
     let barrel_end_pos = transform.translation + transform.rotation * (turret_offset + barrel_end_offset);
     
-    commands.spawn((
-        PbrBundle {
-            mesh: meshes.add(Mesh::from(shape::UVSphere { radius: 0.3, ..default() })),
-            material: materials.add(StandardMaterial {
-                base_color: color,
+    if headless {
+        commands.spawn((
+            Transform::from_translation(barrel_end_pos).with_rotation(transform.rotation),
+            GlobalTransform::default(),
+            Projectile {
+                damage: 20.0,
+                speed: 30.0,
+                lifetime: Timer::from_seconds(3.0, TimerMode::Once),
+                owner,
+            },
+        ));
+    } else {
+        let Some(meshes) = meshes else { return; };
+        let Some(materials) = materials else { return; };
+        commands.spawn((
+            PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::UVSphere { radius: 0.3, ..default() })),
+                material: materials.add(StandardMaterial {
+                    base_color: color,
+                    ..default()
+                }),
+                transform: Transform::from_translation(barrel_end_pos).with_rotation(transform.rotation),
                 ..default()
-            }),
-            transform: Transform::from_translation(barrel_end_pos).with_rotation(transform.rotation),
-            ..default()
-        },
-        Projectile {
-            damage: 20.0,
-            speed: 30.0,
-            lifetime: Timer::from_seconds(3.0, TimerMode::Once),
-            owner,
-        },
-    ));
+            },
+            Projectile {
+                damage: 20.0,
+                speed: 30.0,
+                lifetime: Timer::from_seconds(3.0, TimerMode::Once),
+                owner,
+            },
+        ));
+    }
 }
 
 /// Система отображения здоровья

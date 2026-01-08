@@ -2,6 +2,9 @@ use bevy::prelude::*;
 use bevy::prelude::shape;
 use crate::components::*;
 use crate::genetics::Population;
+use crate::systems::{BASE_SIM_DT, ProgressLog};
+use std::time::{Duration, Instant};
+use crate::Headless;
 use rand::Rng;
 
 #[derive(Resource, Default)]
@@ -36,7 +39,7 @@ pub fn start_battle(
 ) {
     battle_state.tick_count = 0;
     battle_state.real_time = 0.0;
-    battle_state.max_ticks = 3600; // 120 * 30 тактов
+    battle_state.max_ticks = (120.0 / BASE_SIM_DT) as u32; // 120 секунд симуляции
     info!("Битва началась!");
 }
 
@@ -45,13 +48,34 @@ pub fn end_battle(
     mut population: ResMut<Population>,
     query: Query<(Entity, &AIController)>,
     mut next_state: ResMut<NextState<crate::GameState>>,
+    mut progress: ResMut<ProgressLog>,
 ) {
     // Обновляем фитнес всех танков
     for (entity, ai) in query.iter() {
         population.calculate_fitness(entity, ai);
     }
-    
-    info!("Битва завершена!");
+
+    // Выводим итоги боя в консоль: лучшее за матч и глобальный максимум
+    let best_current = population
+        .genomes
+        .iter()
+        .map(|g| g.fitness)
+        .fold(0.0_f32, f32::max);
+    let best_max = population
+        .best_genome
+        .as_ref()
+        .map(|g| g.fitness)
+        .unwrap_or(best_current);
+    let now = Instant::now();
+    if now.duration_since(progress.last) >= Duration::from_secs(30) {
+        progress.last = now;
+        println!(
+            "Бой завершён. Поколение: {}, лучший фитнес в матче: {:.1}, максимальный фитнес: {:.1}",
+            population.generation,
+            best_current,
+            best_max
+        );
+    }
     next_state.set(crate::GameState::Evolution);
 }
 
@@ -92,6 +116,49 @@ pub fn spawn_tanks_from_population(
     }
     
     // Начинаем новый бой
+    next_state.set(crate::GameState::Battle);
+}
+
+/// Создание танков без рендера (headless)
+pub fn spawn_tanks_headless(
+    mut commands: Commands,
+    population: Res<Population>,
+    tank_query: Query<Entity, With<Tank>>,
+    mut next_state: ResMut<NextState<crate::GameState>>,
+    headless: Res<Headless>,
+) {
+    if !headless.0 {
+        return;
+    }
+
+    for entity in tank_query.iter() {
+        commands.entity(entity).despawn_recursive();
+    }
+
+    info!("[Headless] Спавн танков для поколения {}", population.generation);
+
+    let mut rng = rand::thread_rng();
+    for i in 0..10 {
+        let x = rng.gen_range(-40.0..40.0);
+        let z = rng.gen_range(-40.0..40.0);
+        let ai = population.genomes[i % population.genomes.len()].clone();
+
+        let color = if i % 2 == 0 {
+            Color::rgb(0.2, 0.5, 0.8)
+        } else {
+            Color::rgb(0.8, 0.2, 0.2)
+        };
+
+        commands.spawn((
+            Transform::from_translation(Vec3::new(x, 0.5, z)),
+            GlobalTransform::default(),
+            Tank { team: (i % 2) as u32, ..default() },
+            TeamColor(color),
+            FireCooldown::default(),
+            ai,
+        ));
+    }
+
     next_state.set(crate::GameState::Battle);
 }
 
@@ -178,6 +245,7 @@ pub fn check_battle_end(
     mut next_state: ResMut<NextState<crate::GameState>>,
 ) {
     battle_state.tick_count += 1;
+    battle_state.real_time = battle_state.tick_count as f32 * BASE_SIM_DT as f32;
     
     // Проверяем, есть ли танки разных команд
     let mut teams_alive = std::collections::HashSet::new();
@@ -196,14 +264,6 @@ pub fn check_battle_end(
        total_tanks == 0 {
         next_state.set(crate::GameState::Evolution);
     }
-}
-
-/// Обновление реального времени боя
-pub fn update_real_time(
-    time: Res<Time>,
-    mut battle_state: ResMut<BattleState>,
-) {
-    battle_state.real_time += time.delta_seconds();
 }
 
 /// Система для устройства боя между разными поколениями
