@@ -66,8 +66,8 @@ impl NeuralNetwork {
     }
     
     fn activation(x: f32) -> f32 {
-        // Tanh activation
-        x.tanh()
+        // Sigmoid activation (0 to 1)
+        1.0 / (1.0 + (-x).exp())
     }
     
     /// Получает входные данные для нейронной сети из окружения

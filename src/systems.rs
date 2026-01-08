@@ -2,6 +2,8 @@ use bevy::prelude::*;
 use bevy::prelude::shape;
 use bevy_egui::{egui, EguiContexts};
 use crate::components::*;
+use crate::ai::*;
+use crate::map::ObstacleComponent;
 use std::time::Duration;
 
 /// Глобальный множитель скорости симуляции
@@ -146,7 +148,7 @@ pub fn projectile_movement_system(
         let dt = time_multiplier.scaled_seconds(&time);
         let scaled_delta = time_multiplier.scaled_delta(&time);
         // Двигаем снаряд вперед
-        let forward = transform.forward();
+        let forward = transform.back();
         transform.translation += forward * projectile.speed * dt;
         
         // Обновляем таймер жизни
@@ -162,6 +164,7 @@ pub fn collision_system(
     mut commands: Commands,
     projectile_query: Query<(Entity, &Transform, &Projectile)>,
     mut tank_query: Query<(Entity, &Transform, &mut Tank), Without<Projectile>>,
+    obstacle_query: Query<&Transform, With<ObstacleComponent>>,
     mut ai_query: Query<&mut AIController>,
 ) {
     for (proj_entity, proj_transform, projectile) in projectile_query.iter() {
@@ -186,6 +189,15 @@ pub fn collision_system(
                 break;
             }
         }
+        
+        // Проверяем столкновение с препятствиями
+        for obstacle_transform in obstacle_query.iter() {
+            let distance = proj_transform.translation.distance(obstacle_transform.translation);
+            if distance < 5.0 { // Увеличенный радиус для стен и препятствий
+                commands.entity(proj_entity).despawn();
+                break;
+            }
+        }
     }
 }
 
@@ -197,9 +209,11 @@ pub fn player_control_system(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut query: Query<(Entity, &mut Transform, &Tank, &mut FireCooldown), With<PlayerControlled>>,
+    mut query: Query<(Entity, &mut Transform, &Tank, &mut FireCooldown, &TeamColor), With<PlayerControlled>>,
+    all_tanks: Query<(&Transform, &Tank), Without<PlayerControlled>>,
+    obstacle_query: Query<&Transform, (With<ObstacleComponent>, Without<Tank>)>,
 ) {
-    for (entity, mut transform, tank, mut cooldown) in query.iter_mut() {
+    for (entity, mut transform, tank, mut cooldown, team_color) in query.iter_mut() {
         let mut direction = Vec3::ZERO;
         let mut rotation = 0.0;
         let dt = time_multiplier.scaled_seconds(&time);
@@ -220,11 +234,41 @@ pub fn player_control_system(
         }
         
         transform.translation += direction * tank.speed * dt;
+        
+        // Проверяем столкновение с препятствиями
+        let mut collided = false;
+        for obstacle_transform in obstacle_query.iter() {
+            let distance = transform.translation.distance(obstacle_transform.translation);
+            if distance < 6.0 {
+                collided = true;
+                break;
+            }
+        }
+        
+        // Проверяем столкновение с другими танками
+        if !collided {
+            for (other_transform, _other_tank) in all_tanks.iter() {
+                let distance = transform.translation.distance(other_transform.translation);
+                if distance < 3.0 {
+                    collided = true;
+                    break;
+                }
+            }
+        }
+        
+        // Если столкновение, откатываем движение
+        if collided {
+            transform.translation -= direction * tank.speed * dt;
+        }
+        
         transform.rotate_y(rotation * dt);
+        
+        // Фиксируем высоту танка на поверхности
+        transform.translation.y = 0.5;
         
         // Стрельба на пробел с кулдауном
         if keyboard.just_pressed(KeyCode::Space) && cooldown.timer.finished() {
-            spawn_projectile(&mut commands, &mut meshes, &mut materials, entity, &transform);
+            spawn_projectile(&mut commands, &mut meshes, &mut materials, entity, &transform, team_color.0);
             cooldown.timer.reset();
         }
     }
@@ -237,10 +281,12 @@ pub fn ai_control_system(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut ai_tanks: Query<(Entity, &mut Transform, &Tank, &mut AIController, &mut FireCooldown), Without<PlayerControlled>>,
+    mut ai_tanks: Query<(Entity, &mut Transform, &Tank, &mut AIController, &mut FireCooldown, &TeamColor), Without<PlayerControlled>>,
     all_tanks: Query<(&Transform, &Tank), Without<AIController>>,
+    obstacle_query: Query<&Transform, (With<ObstacleComponent>, Without<Tank>)>,
 ) {
-    for (entity, mut transform, tank, mut ai, mut cooldown) in ai_tanks.iter_mut() {
+    info!("AI control running, tanks: {}", ai_tanks.iter().count());
+    for (entity, mut transform, tank, mut ai, mut cooldown, team_color) in ai_tanks.iter_mut() {
         let dt = time_multiplier.scaled_seconds(&time);
         let scaled_delta = time_multiplier.scaled_delta(&time);
 
@@ -248,7 +294,8 @@ pub fn ai_control_system(
         cooldown.timer.tick(scaled_delta);
         
         // Находим ближайшего врага
-        let mut nearest_enemy: Option<(Vec3, f32)> = None;
+        let mut nearest_enemy_pos = None;
+        let mut nearest_enemy_health = None;
         let mut min_distance = f32::MAX;
         
         for (other_transform, other_tank) in all_tanks.iter() {
@@ -256,34 +303,76 @@ pub fn ai_control_system(
                 let distance = transform.translation.distance(other_transform.translation);
                 if distance < min_distance {
                     min_distance = distance;
-                    nearest_enemy = Some((other_transform.translation, distance));
+                    nearest_enemy_pos = Some(other_transform.translation);
+                    nearest_enemy_health = Some(other_tank.health);
                 }
             }
         }
         
-        if let Some((enemy_pos, distance)) = nearest_enemy {
-            // Простая логика: двигаться к врагу и стрелять
-            let direction = (enemy_pos - transform.translation).normalize();
-            let angle_to_enemy = direction.x.atan2(direction.z);
-            let current_angle = transform.rotation.to_euler(EulerRot::YXZ).0;
-            
-            // Поворачиваемся к врагу
-            let angle_diff = angle_to_enemy - current_angle;
-            transform.rotate_y(angle_diff.signum() * tank.rotation_speed * dt);
-            
-            // Двигаемся вперед если враг далеко, назад если близко
-            let forward = transform.forward();
-            if distance > 15.0 {
-                transform.translation += forward * tank.speed * dt;
-            } else if distance < 10.0 {
-                transform.translation -= forward * tank.speed * 0.5 * dt;
+        // Получаем входные данные для нейронной сети
+        let current_angle = transform.rotation.to_euler(EulerRot::YXZ).0;
+        let inputs = NeuralNetwork::get_inputs(
+            transform.translation,
+            current_angle,
+            tank.health,
+            nearest_enemy_pos,
+            nearest_enemy_health,
+        );
+        
+        // Создаем нейронную сеть и получаем выходы
+        let nn = NeuralNetwork::from_genome(&ai.genome);
+        let outputs = nn.forward(&inputs);
+        
+        // Интерпретируем выходы: [0] - движение вперед/назад (0..1 -> -1..1), [1] - поворот (0..1 -> -1..1)
+        let move_input = (outputs[0] - 0.5) * 2.0;
+        let turn_input = (outputs[1] - 0.5) * 2.0;
+        
+        // Применяем движение
+        let forward = transform.forward();
+        let old_pos = transform.translation;
+        transform.translation += forward * move_input * tank.speed * dt;
+        
+        // Проверяем столкновение с препятствиями
+        let mut collided = false;
+        for obstacle_transform in obstacle_query.iter() {
+            let distance = transform.translation.distance(obstacle_transform.translation);
+            if distance < 6.0 { // Увеличенный радиус
+                collided = true;
+                break;
             }
-            
-            // Стреляем если враг в прицеле
-            if angle_diff.abs() < 0.3 && distance < 30.0 && cooldown.timer.finished() {
-                spawn_projectile(&mut commands, &mut meshes, &mut materials, entity, &transform);
-                cooldown.timer.reset();
+        }
+        
+        // Проверяем столкновение с другими танками
+        if !collided {
+            for (other_transform, _other_tank) in all_tanks.iter() {
+                let distance = transform.translation.distance(other_transform.translation);
+                if distance < 3.0 { // Радиус двух танков
+                    collided = true;
+                    break;
+                }
             }
+        }
+        
+        // Если столкновение, откатываем движение
+        if collided {
+            transform.translation = old_pos;
+        }
+        
+        // Применяем поворот
+        transform.rotate_y(turn_input * tank.rotation_speed * dt);
+        
+        // Фиксируем высоту танка на поверхности
+        transform.translation.y = 0.5;
+        
+        // Логируем высоту для отладки
+        if entity.index() == 0 {
+            info!("AI Tank 0 y: {}, obstacles: {}", transform.translation.y, obstacle_query.iter().count());
+        }
+        
+        // Стрельба: если outputs[2] > 0.5 и cooldown готов
+        if outputs[2] > 0.5 && cooldown.timer.finished() {
+            spawn_projectile(&mut commands, &mut meshes, &mut materials, entity, &transform, team_color.0);
+            cooldown.timer.reset();
         }
     }
 }
@@ -295,17 +384,21 @@ fn spawn_projectile(
     materials: &mut ResMut<Assets<StandardMaterial>>,
     owner: Entity,
     transform: &Transform,
+    color: Color,
 ) {
+    // Позиция конца ствола: turret center + barrel offset
+    let turret_offset = Vec3::Y * 0.75;
+    let barrel_end_offset = Vec3::new(0.0, 0.0, 1.25); // конец ствола от turret center
+    let barrel_end_pos = transform.translation + transform.rotation * (turret_offset + barrel_end_offset);
+    
     commands.spawn((
         PbrBundle {
             mesh: meshes.add(Mesh::from(shape::UVSphere { radius: 0.3, ..default() })),
             material: materials.add(StandardMaterial {
-                base_color: Color::rgb(1.0, 0.0, 0.0),
+                base_color: color,
                 ..default()
             }),
-            transform: Transform::from_translation(
-                transform.translation + transform.forward() * 2.0 + Vec3::Y * 0.5
-            ).with_rotation(transform.rotation),
+            transform: Transform::from_translation(barrel_end_pos).with_rotation(transform.rotation),
             ..default()
         },
         Projectile {

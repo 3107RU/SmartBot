@@ -2,6 +2,10 @@ use bevy::prelude::*;
 use bevy::prelude::shape;
 use rand::Rng;
 
+/// Компонент препятствия
+#[derive(Component)]
+pub struct ObstacleComponent;
+
 /// Генерация игровой карты
 pub struct GameMap {
     pub size: f32,
@@ -48,6 +52,7 @@ impl GameMap {
         meshes: &mut ResMut<Assets<Mesh>>,
         materials: &mut ResMut<Assets<StandardMaterial>>,
     ) {
+        info!("Spawning {} obstacles", self.obstacles.len());
         // Земля
         commands.spawn(PbrBundle {
             mesh: meshes.add(Mesh::from(shape::Plane {
@@ -68,16 +73,19 @@ impl GameMap {
         });
         
         for obstacle in &self.obstacles {
-            commands.spawn(PbrBundle {
-                mesh: meshes.add(Mesh::from(shape::Box::new(
-                    obstacle.size.x,
-                    obstacle.size.y,
-                    obstacle.size.z,
-                ))),
-                material: obstacle_material.clone(),
-                transform: Transform::from_translation(obstacle.position),
-                ..default()
-            });
+            commands.spawn((
+                PbrBundle {
+                    mesh: meshes.add(Mesh::from(shape::Box::new(
+                        obstacle.size.x,
+                        obstacle.size.y,
+                        obstacle.size.z,
+                    ))),
+                    material: obstacle_material.clone(),
+                    transform: Transform::from_translation(obstacle.position),
+                    ..default()
+                },
+                ObstacleComponent,
+            ));
         }
         
         // Границы карты
@@ -88,36 +96,50 @@ impl GameMap {
         let wall_height = 5.0;
         let wall_thickness = 1.0;
         
+        info!("Spawning walls");
+        
         // Северная стена
-        commands.spawn(PbrBundle {
-            mesh: meshes.add(Mesh::from(shape::Box::new(self.size, wall_height, wall_thickness))),
-            material: wall_material.clone(),
-            transform: Transform::from_xyz(0.0, wall_height / 2.0, self.size / 2.0),
-            ..default()
-        });
+        commands.spawn((
+            PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::Box::new(self.size, wall_height, wall_thickness))),
+                material: wall_material.clone(),
+                transform: Transform::from_xyz(0.0, wall_height / 2.0, self.size / 2.0),
+                ..default()
+            },
+            ObstacleComponent,
+        ));
         
         // Южная стена
-        commands.spawn(PbrBundle {
-            mesh: meshes.add(Mesh::from(shape::Box::new(self.size, wall_height, wall_thickness))),
-            material: wall_material.clone(),
-            transform: Transform::from_xyz(0.0, wall_height / 2.0, -self.size / 2.0),
-            ..default()
-        });
+        commands.spawn((
+            PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::Box::new(self.size, wall_height, wall_thickness))),
+                material: wall_material.clone(),
+                transform: Transform::from_xyz(0.0, wall_height / 2.0, -self.size / 2.0),
+                ..default()
+            },
+            ObstacleComponent,
+        ));
         
         // Западная стена
-        commands.spawn(PbrBundle {
-            mesh: meshes.add(Mesh::from(shape::Box::new(wall_thickness, wall_height, self.size))),
-            material: wall_material.clone(),
-            transform: Transform::from_xyz(-self.size / 2.0, wall_height / 2.0, 0.0),
-            ..default()
-        });
+        commands.spawn((
+            PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::Box::new(wall_thickness, wall_height, self.size))),
+                material: wall_material.clone(),
+                transform: Transform::from_xyz(-self.size / 2.0, wall_height / 2.0, 0.0),
+                ..default()
+            },
+            ObstacleComponent,
+        ));
         
         // Восточная стена
-        commands.spawn(PbrBundle {
-            mesh: meshes.add(Mesh::from(shape::Box::new(wall_thickness, wall_height, self.size))),
-            material: wall_material,
-            transform: Transform::from_xyz(self.size / 2.0, wall_height / 2.0, 0.0),
-            ..default()
-        });
+        commands.spawn((
+            PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::Box::new(wall_thickness, wall_height, self.size))),
+                material: wall_material,
+                transform: Transform::from_xyz(self.size / 2.0, wall_height / 2.0, 0.0),
+                ..default()
+            },
+            ObstacleComponent,
+        ));
     }
 }

@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy::input::mouse::MouseWheel;
 use bevy_egui::EguiContexts;
 use crate::components::*;
 
@@ -25,6 +26,7 @@ pub struct ThirdPersonCamera;
 /// Система управления камерой
 pub fn camera_control_system(
     keyboard: Res<Input<KeyCode>>,
+    mut mouse_wheel_events: EventReader<MouseWheel>,
     mut camera_state: ResMut<CameraState>,
     mut camera_query: Query<&mut Transform, With<MainCamera>>,
     tank_query: Query<&Transform, (With<Tank>, Without<MainCamera>)>,
@@ -56,7 +58,12 @@ pub fn camera_control_system(
                     camera_transform.translation.y += speed * 0.016;
                 }
                 
-                camera_transform.translation.y = camera_transform.translation.y.clamp(10.0, 100.0);
+                // Zoom with mouse wheel
+                for event in mouse_wheel_events.read() {
+                    camera_transform.translation.y -= event.y * 2.0;
+                }
+                
+                camera_transform.translation.y = camera_transform.translation.y.clamp(10.0, 150.0);
             }
             CameraMode::ThirdPerson => {
                 // В режиме третьего лица следуем за выбранным танком
@@ -85,7 +92,7 @@ pub fn camera_control_system(
             
             // При переключении на вид сверху сбрасываем камеру
             if camera_state.mode == CameraMode::TopDown {
-                camera_transform.translation = Vec3::new(0.0, 50.0, 0.1);
+                camera_transform.translation = Vec3::new(0.0, 150.0, 0.1);
                 camera_transform.look_at(Vec3::ZERO, Vec3::Y);
             }
         }

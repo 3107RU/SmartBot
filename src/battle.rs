@@ -84,7 +84,7 @@ pub fn spawn_tanks_from_population(
             &mut commands,
             &mut meshes,
             &mut materials,
-            Vec3::new(x, 1.0, z),
+            Vec3::new(x, 0.5, z), // Центр танка на высоте 0.5 для контакта с землей
             (i % 2) as u32, // Команда 0 или 1
             Some(ai),
         );
@@ -135,14 +135,14 @@ pub fn spawn_tank(
     commands.entity(tank_entity).insert(FireCooldown::default());
     
     // Башня танка
-    let turret = commands.spawn((
+    let turret_entity = commands.spawn((
         PbrBundle {
             mesh: meshes.add(Mesh::from(shape::Box::new(1.0, 0.5, 1.5))),
             material: materials.add(StandardMaterial {
                 base_color: color,
                 ..default()
             }),
-            transform: Transform::from_translation(position + Vec3::Y * 0.75),
+            transform: Transform::from_translation(Vec3::Y * 0.75),
             ..default()
         },
         TankTurret {
@@ -150,7 +150,22 @@ pub fn spawn_tank(
         },
     )).id();
     
-    commands.entity(tank_entity).add_child(turret);
+    commands.entity(tank_entity).add_child(turret_entity);
+    
+    // Ствол как дочерний объект башни
+    commands.entity(turret_entity).with_children(|turret_parent| {
+        turret_parent.spawn((
+            PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::Box::new(0.2, 0.2, 1.0))),
+                material: materials.add(StandardMaterial {
+                    base_color: color,
+                    ..default()
+                }),
+                transform: Transform::from_translation(Vec3::new(0.0, 0.0, 0.75)),
+                ..default()
+            },
+        ));
+    });
     
     tank_entity
 }

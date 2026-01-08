@@ -65,6 +65,7 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
+    info!("Setup started");
     // Свет
     commands.spawn(PointLightBundle {
         point_light: PointLight {
@@ -96,7 +97,7 @@ fn setup(
     // Главная камера (вид сверху)
     commands.spawn((
         Camera3dBundle {
-            transform: Transform::from_xyz(0.0, 50.0, 0.1)
+            transform: Transform::from_xyz(0.0, 150.0, 0.1)
                 .looking_at(Vec3::ZERO, Vec3::Y),
             ..default()
         },
